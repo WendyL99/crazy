@@ -1,0 +1,253 @@
+<?php
+class Application_Model_Payment_PaypalExpress
+{
+
+    protected $APIUserName = 'paypal_api1.crazysales.com.au';
+
+    protected $APIPassword = '6WKYD87JKAC8646E';
+
+    protected $APISignature = 'AS8-mTdfGIPrAkNc2E6pQvwhV44aAZzl8civ3Z7VK-WrfMvYIMbhojU4';
+
+    protected $APIEndpoint = 'https://api-3t.paypal.com/nvp';
+
+    protected $WebsiteURL = 'https://m.crazysales.com.au/';
+
+    protected $version = '109';
+
+    protected $PAYPALURL = 'https://www.paypal.com/webscr&cmd=_express-checkout&token=';
+
+    protected $PROXYHOST = '127.0.0.1';
+
+    protected $PROXYPORT = '808';
+
+    protected $USEPROXY = false;
+
+    protected $returnURL = '';
+
+    protected $cancelURL = '';
+    
+    protected $_paypalTokenlogfolder ='';
+    
+    function __construct()
+    {
+        $test = 1;
+        if($test){
+            //$this->WebsiteURL = 'http://10.0.0.214/';
+            $this->WebsiteURL = 'http://192.168.10.228/';
+            $this->APIUserName = 'dba.zyong-facilitator_api1.gmail.com';
+            $this->APIPassword = '1379290201';
+            $this->APISignature = 'Ai1PaghZh5FmBLCDCTQpwG8jB264A8fLX5SF5hFIiJg1xuyUGVrV7lPE';
+            $this->APIEndpoint = 'https://api-3t.sandbox.paypal.com/nvp';
+            $this->PAYPALURL = 'https://www.sandbox.paypal.com/webscr&cmd=_express-checkout&token=';
+        }
+        $this->_paypalTokenlogfolder = $_SERVER['DOCUMENT_ROOT'].'/../log/payment/paypal/';
+        $this->returnURL = $this->WebsiteURL . 'paypalexpress/checkout';
+        $this->cancelURL = $this->WebsiteURL . 'cart';
+        
+    }
+    
+    protected function WriteTokenToFile($postData)
+    {
+        $req = '';
+        foreach ($postData as $key => $value) {
+            $req .= "&$key=$value";
+        }
+        $file = $this->_paypalTokenlogfolder . date('Ymd') . '-Express-TokenData.log';
+        $fh = fopen($file, 'a');
+        fwrite($fh, "[" . date('Ymd h:i:s') . "]: " . $req . "\r\n");
+        fclose($fh);
+    }
+
+    public function SetExpressCheckout($amount, $trackingNumber1, $trackingNumber2, $description='', $address='')
+    {
+        $nvpstr = '';
+        $nvpstr .= '&PAYMENTACTION='.'Sale';
+        $nvpstr .= '&CURRENCYCODE='.'AUD';
+        $nvpstr .= '&LOCALECODE='.'AU';
+        $nvpstr .= '&HDRIMG='.urlencode('https://www.e-junkie.com/sslpic/928.03eeaae0d1a7f0325129ed776d806c98.gif');
+        $nvpstr .= '&SOLUTIONTYPE='.'Sole';
+        $nvpstr .= '&AMT='.$amount;
+        $nvpstr .= '&RETURNURL='.urlencode($this->returnURL);
+        $nvpstr .= '&CANCELURL='.urlencode($this->cancelURL);
+        
+        if ($description!=''){
+            $nvpstr .= '&DESC='.urlencode($description);
+        }            
+        
+        if ($address==''){
+            $nvpstr .= '&ADDROVERRIDE=0';
+        } else    {
+            if (!$address['SHIPTONAME'] || !$address['SHIPTOSTREET'] ||!$address['SHIPTOCITY'] ||
+                !$address['SHIPTOSTATE'] ||!$address['SHIPTOCOUNTRYCODE'] ||!$address['SHIPTOZIP'])
+                $nvpstr .= '&ADDROVERRIDE=0';
+            else
+            {    
+                $nvpstr .= '&ADDROVERRIDE=1';                
+                $nvpstr .= '&SHIPTONAME='.urlencode($address['SHIPTONAME']);
+                $nvpstr .= '&SHIPTOSTREET='.urlencode($address['SHIPTOSTREET']);
+                $nvpstr .= '&SHIPTOCITY='.urlencode($address['SHIPTOCITY']);
+                $nvpstr .= '&SHIPTOSTATE='.urlencode($address['SHIPTOSTATE']);
+                $nvpstr .= '&SHIPTOCOUNTRYCODE='.urlencode($address['SHIPTOCOUNTRYCODE']);
+                $nvpstr .= '&SHIPTOZIP='.urlencode($address['SHIPTOZIP']);
+                
+                if ($address['SHIPTOSTREET2'])
+                    $nvpstr .= '&SHIPTOSTREET2='.urlencode($address['SHIPTOSTREET2']);
+                if ($address['PHONENUM'])
+                    $nvpstr .= '&PHONENUM='.urlencode($address['PHONENUM']);
+            }
+        }
+        $resArray=$this->hash_call('SetExpressCheckout',$nvpstr);
+        $ack = strtoupper($resArray["ACK"]);
+
+        if($ack=="SUCCESS")
+        {
+            $PaypalExpressSession = new Zend_Session_Namespace('PaypalExpress');
+            $PaypalExpressSession = $resArray;
+            $token = urldecode($resArray["TOKEN"]);
+            $TargetURL = $this->PAYPALURL.$token;
+        }
+        else
+        {
+            $PaypalExpressSession = new Zend_Session_Namespace('PaypalExpress');
+            unset($PaypalExpressSession);
+            $TargetURL = $this->cancelURL;
+        }
+        return $TargetURL;
+    }
+
+    public function GetExpressCheckoutDetails($token)
+    {
+        $nvpstr='&TOKEN='.urlencode($token);
+        $resArray=$this->hash_call('GetExpressCheckoutDetails',$nvpstr);
+        $this->WriteTokenToFile($resArray);
+        return $resArray;
+    }
+    
+   public function DoExpressCheckoutPayment($token, $amount, $payerID, $description='', $notifyURL='', $address='')
+    {     
+        $nvpstr = '';
+        $nvpstr .='&PAYMENTACTION='.'Sale';
+        $nvpstr .='&CURRENCYCODE='.'AUD';
+    
+        $nvpstr .='&TOKEN='.urlencode($token);
+        $nvpstr .='&PAYERID='.urlencode($payerID);
+        $nvpstr .='&AMT='.$amount;
+        $nvpstr .='&CUSTOM='.$description;
+        
+        if ($description!='')
+        {
+            $nvpstr .='&DESC='.urlencode($description);
+        }
+        if ($notifyURL!='')
+        {
+            $nvpstr .='&NOTIFYURL='.urlencode($notifyURL);
+        }
+        
+        if ($address!='')
+        {
+            if ($address['SHIPTONAME'] && $address['SHIPTOSTREET'] && $address['SHIPTOCITY'] &&
+                $address['SHIPTOSTATE'] && $address['SHIPTOCOUNTRYCODE'] && $address['SHIPTOZIP'])
+            {    
+                $nvpstr .= '&SHIPTONAME='.urlencode($address['SHIPTONAME']);
+                $nvpstr .= '&SHIPTOSTREET='.urlencode($address['SHIPTOSTREET']);
+                $nvpstr .= '&SHIPTOCITY='.urlencode($address['SHIPTOCITY']);
+                $nvpstr .= '&SHIPTOSTATE='.urlencode($address['SHIPTOSTATE']);
+                $nvpstr .= '&SHIPTOCOUNTRYCODE='.urlencode($address['SHIPTOCOUNTRYCODE']);
+                $nvpstr .= '&SHIPTOZIP='.urlencode($address['SHIPTOZIP']);
+                
+                if ($address['SHIPTOSTREET2'])
+                    $nvpstr .= '&SHIPTOSTREET2='.urlencode($address['SHIPTOSTREET2']);
+                if ($address['PHONENUM'])
+                    $nvpstr .= '&PHONENUM='.urlencode($address['PHONENUM']);
+            }
+        }
+
+        $resArray=$this->hash_call('DoExpressCheckoutPayment',$nvpstr);
+        
+        return $resArray;
+    }
+    
+    /**
+      * hash_call: Function to perform the API call to PayPal using API signature
+      * @methodName is name of API  method.
+      * @nvpStr is nvp string.
+      * returns an associtive array containing the response from the server.
+    */
+    
+    
+    protected function hash_call($methodName,$nvpStr)
+    {    
+        //setting the curl parameters.
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL,$this->APIEndpoint);
+        curl_setopt($ch, CURLOPT_VERBOSE, 1);
+        
+        //turning off the server and peer verification(TrustManager Concept).
+        curl_setopt($ch, CURLOPT_SSLVERSION,6);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, FALSE);
+        
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
+        curl_setopt($ch, CURLOPT_POST, 1);
+        
+        if($this->USEPROXY){
+            curl_setopt ($ch, CURLOPT_PROXY, $this->PROXYHOST.':'.$this->PROXYPORT); 
+        }
+        
+        $nvpreq = 'METHOD='.urlencode($methodName);
+        $nvpreq.= '&VERSION='.urlencode($this->version);
+        $nvpreq.= '&PWD='.urlencode($this->APIPassword);
+        $nvpreq.= '&USER='.urlencode($this->APIUserName);
+        $nvpreq.= '&SIGNATURE='.urlencode($this->APISignature);
+        $nvpreq.= $nvpStr;
+        
+        curl_setopt($ch,CURLOPT_POSTFIELDS,$nvpreq);
+        
+        $response = curl_exec($ch);
+        if ($response == false) {
+            return false;
+        }
+        
+        $nvpResArray=$this->deformatNVP($response);
+        $nvpReqArray=$this->deformatNVP($nvpreq);        
+        
+        if (curl_errno($ch)) {
+            $scURL = trim( $this->WebsiteURL );
+            $scURL = str_replace('http://',  '', $scURL);
+            $scURL = str_replace('https://', '', $scURL);
+            $scURL = 'http://'.$scURL;
+            curl_close($ch);
+        }
+
+        return $nvpResArray;
+    }
+    
+    /** This function will take NVPString and convert it to an Associative Array and it will decode the response.
+      * It is usefull to search for a particular key and displaying arrays.
+      * @nvpstr is NVPString.
+      * @nvpArray is Associative Array.
+      */
+    
+    protected function deformatNVP($nvpstr)
+    {
+        $intial=0;
+        $nvpArray = array();
+        while(strlen($nvpstr)){
+            //postion of Key
+            $keypos= strpos($nvpstr,'=');
+            //position of value
+            $valuepos = strpos($nvpstr,'&') ? strpos($nvpstr,'&'): strlen($nvpstr);
+    
+            /*getting the Key and Value values and storing in a Associative Array*/
+            $keyval=substr($nvpstr,$intial,$keypos);
+            $valval=substr($nvpstr,$keypos+1,$valuepos-$keypos-1);
+            //decoding the respose
+            $nvpArray[urldecode($keyval)] =urldecode( $valval);
+            $nvpstr=substr($nvpstr,$valuepos+1,strlen($nvpstr));
+         }
+        return $nvpArray;
+    }
+
+}
+
+?>
