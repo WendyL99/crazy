@@ -1,0 +1,8 @@
+<1> 创建和合并分支
+
+git branch <branch name>  创建分支
+
+git checkout <branch name>  切换到该分支
+
+git branch    查看当前所在的分支以及列出所有的分支， 当前分支前面会标一个*号
+
